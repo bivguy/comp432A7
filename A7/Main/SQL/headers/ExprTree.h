@@ -136,6 +136,14 @@ public:
 		attName = string (attNameIn);
 	}
 
+	string getAtName() {
+		return attName;
+	}
+
+	string getTableName() {
+		return tableName;
+	}
+
 	string toString () {
 		return "[" + tableName + "_" + attName + "]";
 	}	
