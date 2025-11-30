@@ -5,27 +5,53 @@
 #include "ParserTypes.h"
 
 const bool DEBUGBASECASE = true;
+const bool DEBUG_OUTER_FN = true;
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
 pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_TablePtr> &allTables) {
 	MyDB_SchemaPtr totSchema = make_shared<MyDB_Schema>();
-	map <string, MyDB_TablePtr> filteredTables = map<string, MyDB_TablePtr>();
+	map<string, MyDB_TablePtr> filteredTables = map<string, MyDB_TablePtr>();
+	map<string, MyDB_AttTypePtr> attToType = map<string, MyDB_AttTypePtr>();
 
-	for (auto &val : this->valuesToSelect) {
-		// TODO: figure out how we get the actual att type instead of hard coding string
-		pair<string, MyDB_AttTypePtr> attribute = make_pair(val->getId(), make_shared<MyDB_StringAttType>());
-		cout << "about to add in attribute " << attribute.first << flush << "\n";
-		totSchema->appendAtt(attribute);
+	if (DEBUG_OUTER_FN) {
+		cout << "Going through all disjunctions" << flush << "\n";
+		for (auto &d : this->allDisjunctions) {
+			cout << "Disjunction: " << d->toString() << "\n" << flush;
+		}
 	}
 
 	// filter the tables to only the ones we are using
 	for (auto &[tableName, aliasName] : this->tablesToProcess) {
 		cout << "about to add in table " << tableName << flush << "\n";
 		MyDB_TablePtr aliasedTable = allTables[tableName]->alias(aliasName);
+
+		// go through each aliased attribute in this table
+		for (auto &att:  aliasedTable->getSchema()->getAtts()) {
+			attToType.insert({att.first , att.second});
+		}
 		filteredTables.insert({aliasName, aliasedTable});
 	}
 
-	
+	for (auto &val : this->valuesToSelect) {
+		string attName = val->getId();
+		cout << "we're at value with id " << attName << "\n" << flush ;
+		MyDB_AttTypePtr attType;
+
+		// check if its an agg type
+		if (val->isAvg() || val->isSum()) {
+			continue;
+		}
+			// attType = make_shared<MyDB_DoubleAttType>();
+		// } else {
+		attType = attToType[attName];
+		// }
+		
+		// TODO: figure out how we get the actual att type instead of hard coding string
+		pair<string, MyDB_AttTypePtr> attribute = make_pair(attName, attType);
+		cout << "about to add in attribute " << attribute.first << " of type " <<  attribute.second->toString() <<"\n" << flush ;
+		totSchema->appendAtt(attribute);
+	}
+
 	cout << "about to optimize the query plan\n" << flush;
 	// here we call the recursive, exhaustive enum. algorithm
 	return optimizeQueryPlan (filteredTables, totSchema, this->allDisjunctions);
@@ -56,10 +82,11 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 			}
 			table = tablePtr;
 		}
+		MyDB_StatsPtr outputStats = make_shared<MyDB_Stats>(table)->costSelection(allDisjunctions);
 		res = make_shared<LogicalTableScan>(
 			table, 
 			outputTable, 
-			make_shared<MyDB_Stats>(table)->costSelection(allDisjunctions), 
+			outputStats, 
 			allDisjunctions);
 		
 		if (DEBUGBASECASE) {
@@ -68,11 +95,8 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 				cout << "attribute of name " << attName  << "\n" << flush;
 			}
 		}
-		MyDB_StatsPtr stats = res->getStats();
-		MyDB_StatsPtr curCost = stats->costSelection(allDisjunctions);
-
 		// some code here...
-		return make_pair (res, curCost->getTupleCount());
+		return make_pair (res, outputStats->getTupleCount());
 	}
 
 	// we have at least one join

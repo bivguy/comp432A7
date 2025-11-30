@@ -119,8 +119,12 @@ public:
 	// outputStats: the complete set of output statistics
 	// selectionPred: the selection predicates to execute while we scan the input
 	//
-	LogicalTableScan (MyDB_TablePtr inputSpec, MyDB_TablePtr outputSpec, MyDB_StatsPtr outputStats, 
-		vector <ExprTreePtr> &selectionPred) : inputSpec (inputSpec), outputSpec (outputSpec),
+	LogicalTableScan (
+		MyDB_TablePtr inputSpec, 
+		MyDB_TablePtr outputSpec, 
+		MyDB_StatsPtr outputStats, 
+		vector <ExprTreePtr> &selectionPred
+	) : inputSpec (inputSpec), outputSpec (outputSpec),
 		outputStats (outputStats), selectionPred (selectionPred) {}
 
 	// print this tree out
