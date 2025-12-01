@@ -6,6 +6,7 @@
 
 const bool DEBUGBASECASE = true;
 const bool DEBUG_OUTER_FN = true;
+typedef vector<pair<string, MyDB_TablePtr>> subset;
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
 pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_TablePtr> &allTables) {
@@ -52,14 +53,50 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 		totSchema->appendAtt(attribute);
 	}
 
-	cout << "about to optimize the query plan\n" << flush;
 	// here we call the recursive, exhaustive enum. algorithm
 	return optimizeQueryPlan (filteredTables, totSchema, this->allDisjunctions);
 }
 
+// first pair is left table subset, second pair is right table subset
+vector<pair<subset, subset>> generateSubsets(map <string, MyDB_TablePtr> &allTables) {
+	vector<pair<subset, subset>> subsets;	
+	vector<pair<string, MyDB_TablePtr>> tableList;
+
+	for (auto &[tableName, tablePtr] : allTables) {
+		tableList.push_back({tableName, tablePtr});
+	}
+
+	int n = allTables.size();
+	for (int i = 0; i < (1 << n); i++ ) {
+		subset leftSubset;
+		subset rightSubset;
+
+		for (int j = 0; j < n; j++) {
+			if (i & (1 << j)) {
+				// Check if the jth bit is set
+				leftSubset.push_back(tableList[j]);
+			} else {
+				rightSubset.push_back(tableList[j]);
+			}
+		}
+
+		int lSize = leftSubset.size();
+		// skip if left table gets > n / 2 to avoid duplicates
+		if (lSize> n / 2 || lSize == 0) {
+			continue;
+		}
+
+		subsets.push_back({leftSubset, rightSubset});
+	}
+
+	return subsets;
+}
+
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
-pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_TablePtr> &allTables, 
-	MyDB_SchemaPtr totSchema, vector <ExprTreePtr> &allDisjunctions) {
+pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
+	map <string, MyDB_TablePtr> &allTables, 
+	MyDB_SchemaPtr totSchema, 
+	vector <ExprTreePtr> &allDisjunctions) {
 	double best = 9e99;
 	LogicalOpPtr res = nullptr;
 	double cost = 9e99;
@@ -74,7 +111,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 
 	// case where no joins
 	if (allTables.size () == 1) {
-		
 		MyDB_TablePtr table;
 		for (const auto &[key, tablePtr]: allTables) {
 			if (DEBUGBASECASE) {
@@ -97,6 +133,74 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 		}
 		// some code here...
 		return make_pair (res, outputStats->getTupleCount());
+	}
+
+	// loop through every break into a LHS and a RHS
+	for (auto &[left, right] : generateSubsets(allTables)) {
+		vector <ExprTreePtr> leftCNF, rightCNF, topCNF;
+		// get the CNF expressions: left, right, and top
+		for (auto &d : allDisjunctions) {
+			bool referencesLeft, referencesRight;
+			// see if it refers to left
+			for (auto table: left) {
+				if (d->referencesTable(table.first)) {
+					referencesLeft = true;
+					break;
+				}
+			}
+
+			// see if it refers to right
+			for (auto table: right) {
+				if (d->referencesTable(table.first)) {
+					referencesRight = true;
+					break;
+				}
+			}
+
+			// add disjunction to appropriate CNF
+			if (referencesLeft && !referencesRight) {
+				leftCNF.push_back(d);
+			} else if (!referencesLeft && referencesRight) {
+				rightCNF.push_back(d);
+			} else {
+				topCNF.push_back(d);
+			}
+
+			
+			// create a vector of the left and right tables
+			map<string, MyDB_TablePtr> leftTableMap = map<string, MyDB_TablePtr>();
+			map<string, MyDB_TablePtr> rightTableMap = map<string, MyDB_TablePtr>();
+			for (auto &[tblName, tblPtr] : left) {
+				leftTableMap.insert({tblName, tblPtr});
+			}
+			for (auto &[tblName, tblPtr] : right) {
+				rightTableMap.insert({tblName, tblPtr});
+			}
+
+			// figure out what atts we need from the left and the right
+			// TODO: the atts and schemas need to be filled in
+			pair<string, MyDB_AttTypePtr> leftAtts, rightAtts;
+			MyDB_SchemaPtr leftSchema, rightSchema;
+
+			pair <LogicalOpPtr, double> leftRes = this->optimizeQueryPlan(leftTableMap, leftSchema, leftCNF);
+			pair <LogicalOpPtr, double> rightRes = this->optimizeQueryPlan(rightTableMap, leftSchema, leftCNF);
+			
+			// TODO: get the current plan
+			// Let myExp = project_A (leftExp Join_topCNF rightExp)
+			vector <ExprTreePtr> myExpr;
+			// TODO: get the stats for the current plan, current definition is wrong
+            // note: getStats gets T, V for bestExp, using the statistics in leftStats U rightStats
+			MyDB_StatsPtr myStats = make_shared<MyDB_Stats>();
+
+			double curCost = myStats->getTupleCount() + leftRes.second + rightRes.second;
+			// if the cost is better, update best
+			if (curCost < best) {
+				best = curCost;
+				// TODO: add correct res value
+				// res = myExpr;
+			}
+		}	
+
 	}
 
 	// we have at least one join
