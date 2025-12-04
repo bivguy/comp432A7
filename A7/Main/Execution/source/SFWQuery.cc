@@ -22,7 +22,9 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 	}
 
 	// filter the tables to only the ones we are using
-	for (auto &[tableName, aliasName] : this->tablesToProcess) {
+	for (auto &table : this->tablesToProcess) {
+		string tableName = table.first;
+		string aliasName = table.second;
 		cout << "about to add in table " << tableName << flush << "\n";
 		MyDB_TablePtr aliasedTable = allTables[tableName]->alias(aliasName);
 
@@ -62,8 +64,8 @@ vector<pair<subset, subset>> generateSubsets(map <string, MyDB_TablePtr> &allTab
 	vector<pair<subset, subset>> subsets;	
 	vector<pair<string, MyDB_TablePtr>> tableList;
 
-	for (auto &[tableName, tablePtr] : allTables) {
-		tableList.push_back({tableName, tablePtr});
+	for (auto &table : allTables) {
+		tableList.push_back(table);
 	}
 
 	int n = allTables.size();
@@ -92,6 +94,33 @@ vector<pair<subset, subset>> generateSubsets(map <string, MyDB_TablePtr> &allTab
 	return subsets;
 }
 
+MyDB_SchemaPtr getAtts(subset tables, MyDB_SchemaPtr totSchema, vector <ExprTreePtr> &topCNF) {
+	MyDB_SchemaPtr schema = make_shared<MyDB_Schema>();
+	for (auto &table : tables) {
+		string tblName = table.first;
+		MyDB_TablePtr tblPtr = table.second;
+		for (auto &att : tblPtr->getSchema()->getAtts()) {
+			string attName = att.first;
+
+			// Check if the att is in totSchema
+			if (totSchema->getAttByName(attName).first != -1) {
+				schema->appendAtt(att);
+				continue;
+			}
+
+			// Check if the att is in topCNF
+			for (auto &expr : topCNF) {
+				if (expr->referencesAtt(tblName, attName)) {
+					schema->appendAtt(att);
+					break;
+				}
+			}
+		}
+	}
+
+	return schema;
+}
+
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
 pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	map <string, MyDB_TablePtr> &allTables, 
@@ -99,7 +128,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	vector <ExprTreePtr> &allDisjunctions) {
 	double best = 9e99;
 	LogicalOpPtr res = nullptr;
-	double cost = 9e99;
 
 	// some code here...
 	string outputTableName = "tempTable1";
@@ -112,7 +140,9 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	// case where no joins
 	if (allTables.size () == 1) {
 		MyDB_TablePtr table;
-		for (const auto &[key, tablePtr]: allTables) {
+		for (const auto &tbl: allTables) {
+			string key = tbl.first;
+			MyDB_TablePtr tablePtr = tbl.second;
 			if (DEBUGBASECASE) {
 				cout << "at the base case for table " << key  << "\n" << flush;
 			}
@@ -127,7 +157,8 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 		
 		if (DEBUGBASECASE) {
 			auto atts = table->getSchema()->getAtts();
-			for (auto &[attName, _] : atts) {
+			for (auto &att : atts) {
+				string attName = att.first;
 				cout << "attribute of name " << attName  << "\n" << flush;
 			}
 		}
@@ -136,7 +167,9 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	}
 
 	// loop through every break into a LHS and a RHS
-	for (auto &[left, right] : generateSubsets(allTables)) {
+	for (auto &sub : generateSubsets(allTables)) {
+		subset left = sub.first;
+		subset right = sub.second;
 		vector <ExprTreePtr> leftCNF, rightCNF, topCNF;
 		// get the CNF expressions: left, right, and top
 		for (auto &d : allDisjunctions) {
@@ -165,42 +198,39 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 			} else {
 				topCNF.push_back(d);
 			}
+		}
 
 			
-			// create a vector of the left and right tables
-			map<string, MyDB_TablePtr> leftTableMap = map<string, MyDB_TablePtr>();
-			map<string, MyDB_TablePtr> rightTableMap = map<string, MyDB_TablePtr>();
-			for (auto &[tblName, tblPtr] : left) {
-				leftTableMap.insert({tblName, tblPtr});
-			}
-			for (auto &[tblName, tblPtr] : right) {
-				rightTableMap.insert({tblName, tblPtr});
-			}
+		// create a vector of the left and right tables
+		map<string, MyDB_TablePtr> leftTableMap = map<string, MyDB_TablePtr>();
+		map<string, MyDB_TablePtr> rightTableMap = map<string, MyDB_TablePtr>();
+		for (auto &tbl : left) {
+			leftTableMap.insert(tbl);
+		}
+		for (auto &tbl : right) {
+			rightTableMap.insert(tbl);
+		}
 
-			// figure out what atts we need from the left and the right
-			// TODO: the atts and schemas need to be filled in
-			pair<string, MyDB_AttTypePtr> leftAtts, rightAtts;
-			MyDB_SchemaPtr leftSchema, rightSchema;
+		// figure out what atts we need from the left and the right
+		MyDB_SchemaPtr leftSchema = getAtts(left, totSchema, topCNF);
+		MyDB_SchemaPtr rightSchema = getAtts(right, totSchema, topCNF);
+		
+		pair <LogicalOpPtr, double> leftRes = this->optimizeQueryPlan(leftTableMap, leftSchema, leftCNF);
+		pair <LogicalOpPtr, double> rightRes = this->optimizeQueryPlan(rightTableMap, rightSchema, rightCNF);
+		
+		// TODO: get the current plan
+		// Let myExp = project_A (leftExp Join_topCNF rightExp)
+		MyDB_StatsPtr myStats = leftRes.first->getStats()->costJoin(topCNF, rightRes.first->getStats());
+		LogicalOpPtr myJoin = make_shared<LogicalJoin>(leftRes.first, rightRes.first, outputTable, allDisjunctions, myStats);
+		// note: getStats gets T, V for bestExp, using the statistics in leftStats U rightStats
 
-			pair <LogicalOpPtr, double> leftRes = this->optimizeQueryPlan(leftTableMap, leftSchema, leftCNF);
-			pair <LogicalOpPtr, double> rightRes = this->optimizeQueryPlan(rightTableMap, leftSchema, leftCNF);
-			
-			// TODO: get the current plan
-			// Let myExp = project_A (leftExp Join_topCNF rightExp)
-			vector <ExprTreePtr> myExpr;
-			// TODO: get the stats for the current plan, current definition is wrong
-            // note: getStats gets T, V for bestExp, using the statistics in leftStats U rightStats
-			MyDB_StatsPtr myStats = make_shared<MyDB_Stats>();
-
-			double curCost = myStats->getTupleCount() + leftRes.second + rightRes.second;
-			// if the cost is better, update best
-			if (curCost < best) {
-				best = curCost;
-				// TODO: add correct res value
-				// res = myExpr;
-			}
-		}	
-
+		double curCost = myStats->getTupleCount() + leftRes.second + rightRes.second;
+		// if the cost is better, update best
+		if (curCost < best) {
+			best = curCost;
+			// TODO: add correct res value
+			res = myJoin;
+		}
 	}
 
 	// we have at least one join
@@ -240,7 +270,7 @@ SFWQuery :: SFWQuery (struct ValueList *selectClause, struct FromList *fromClaus
         struct CNF *cnf) {
         valuesToSelect = selectClause->valuesToCompute;
         tablesToProcess = fromClause->aliases;
-	allDisjunctions = cnf->disjunctions;
+		allDisjunctions = cnf->disjunctions;
 }
 
 SFWQuery :: SFWQuery (struct ValueList *selectClause, struct FromList *fromClause) {
