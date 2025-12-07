@@ -4,8 +4,8 @@
 
 #include "ParserTypes.h"
 
-const bool DEBUGBASECASE = true;
-const bool DEBUG_OUTER_FN = true;
+const bool DEBUGBASECASE = false;
+const bool DEBUG_OUTER_FN = false;
 typedef vector<pair<string, MyDB_TablePtr>> subset;
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
@@ -25,7 +25,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 	for (auto &table : this->tablesToProcess) {
 		string tableName = table.first;
 		string aliasName = table.second;
-		cout << "about to add in table " << tableName << flush << "\n";
 		MyDB_TablePtr aliasedTable = allTables[tableName]->alias(aliasName);
 
 		// go through each aliased attribute in this table
@@ -37,21 +36,15 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 
 	for (auto &val : this->valuesToSelect) {
 		string attName = val->getId();
-		cout << "we're at value with id " << attName << "\n" << flush ;
 		MyDB_AttTypePtr attType;
 
 		// check if its an agg type
 		if (val->isAvg() || val->isSum()) {
 			continue;
 		}
-			// attType = make_shared<MyDB_DoubleAttType>();
-		// } else {
 		attType = attToType[attName];
-		// }
 		
-		// TODO: figure out how we get the actual att type instead of hard coding string
 		pair<string, MyDB_AttTypePtr> attribute = make_pair(attName, attType);
-		cout << "about to add in attribute " << attribute.first << " of type " <<  attribute.second->toString() <<"\n" << flush ;
 		totSchema->appendAtt(attribute);
 	}
 
@@ -130,10 +123,10 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	LogicalOpPtr res = nullptr;
 
 	// some code here...
-	string outputTableName = "tempTable1";
+	string outputTableName = "tempTable" + to_string(this->tableNum++);
 	MyDB_TablePtr outputTable = make_shared<MyDB_Table>(outputTableName, outputTableName, totSchema);
 	if (DEBUGBASECASE) {
-		cout << "Made the output table\n" << flush;
+		cout << "Made the output table " << outputTableName << endl << flush;
 		cout << "allTables size: " << allTables.size () << " \n" << flush ;
 	}
 
@@ -167,13 +160,15 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 	}
 
 	// loop through every break into a LHS and a RHS
-	for (auto &sub : generateSubsets(allTables)) {
+	auto subsets = generateSubsets(allTables);
+	for (auto &sub : subsets) {
 		subset left = sub.first;
 		subset right = sub.second;
 		vector <ExprTreePtr> leftCNF, rightCNF, topCNF;
 		// get the CNF expressions: left, right, and top
 		for (auto &d : allDisjunctions) {
-			bool referencesLeft, referencesRight;
+			bool referencesLeft = false;
+			bool referencesRight = false;
 			// see if it refers to left
 			for (auto table: left) {
 				if (d->referencesTable(table.first)) {
@@ -218,7 +213,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 		pair <LogicalOpPtr, double> leftRes = this->optimizeQueryPlan(leftTableMap, leftSchema, leftCNF);
 		pair <LogicalOpPtr, double> rightRes = this->optimizeQueryPlan(rightTableMap, rightSchema, rightCNF);
 		
-		// TODO: get the current plan
 		// Let myExp = project_A (leftExp Join_topCNF rightExp)
 		MyDB_StatsPtr myStats = leftRes.first->getStats()->costJoin(topCNF, rightRes.first->getStats());
 		LogicalOpPtr myJoin = make_shared<LogicalJoin>(leftRes.first, rightRes.first, outputTable, allDisjunctions, myStats);
@@ -228,7 +222,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 		// if the cost is better, update best
 		if (curCost < best) {
 			best = curCost;
-			// TODO: add correct res value
 			res = myJoin;
 		}
 	}

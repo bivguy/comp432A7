@@ -18,11 +18,11 @@ pair <int, MyDB_AttTypePtr> MyDB_Schema :: getAttByName (string findMe) {
 			counter++;
 		}
 	}	
-	cout << "Could not find attribute " << findMe << "\n";
-	cout << "Candidates were: \n";
-	for (auto entry : allAtts) {
-		cout << "\t" << entry.first << "\n";
-	}
+	// cout << "Could not find attribute " << findMe << "\n";
+	// cout << "Candidates were: \n";
+	// for (auto entry : allAtts) {
+	// 	cout << "\t" << entry.first << "\n";
+	// }
 	return make_pair (-1, nullptr);
 }
 
