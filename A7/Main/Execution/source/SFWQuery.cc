@@ -12,7 +12,6 @@ typedef vector<pair<string, MyDB_TablePtr>> subset;
 pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_TablePtr> &allTables) {
 	MyDB_SchemaPtr totSchema = make_shared<MyDB_Schema>();
 	map<string, MyDB_TablePtr> filteredTables = map<string, MyDB_TablePtr>();
-	map<string, MyDB_AttTypePtr> attToType = map<string, MyDB_AttTypePtr>();
 
 	if (DEBUG_OUTER_FN) {
 		cout << "Going through all disjunctions" << flush << "\n";
@@ -28,24 +27,12 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 		MyDB_TablePtr aliasedTable = allTables[tableName]->alias(aliasName);
 
 		// go through each aliased attribute in this table
-		for (auto &att:  aliasedTable->getSchema()->getAtts()) {
-			attToType.insert({att.first , att.second});
-		}
+		for (auto &att:  aliasedTable->getSchema()->getAtts())
+			for (auto &val : this->valuesToSelect)
+				if (val->referencesAtt(aliasName, att.first))
+					totSchema->appendAtt(att);
+
 		filteredTables.insert({aliasName, aliasedTable});
-	}
-
-	for (auto &val : this->valuesToSelect) {
-		string attName = val->getId();
-		MyDB_AttTypePtr attType;
-
-		// check if its an agg type
-		if (val->isAvg() || val->isSum()) {
-			continue;
-		}
-		attType = attToType[attName];
-		
-		pair<string, MyDB_AttTypePtr> attribute = make_pair(attName, attType);
-		totSchema->appendAtt(attribute);
 	}
 
 	// here we call the recursive, exhaustive enum. algorithm
@@ -194,7 +181,6 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 				topCNF.push_back(d);
 			}
 		}
-
 			
 		// create a vector of the left and right tables
 		map<string, MyDB_TablePtr> leftTableMap = map<string, MyDB_TablePtr>();
@@ -215,7 +201,7 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (
 		
 		// Let myExp = project_A (leftExp Join_topCNF rightExp)
 		MyDB_StatsPtr myStats = leftRes.first->getStats()->costJoin(topCNF, rightRes.first->getStats());
-		LogicalOpPtr myJoin = make_shared<LogicalJoin>(leftRes.first, rightRes.first, outputTable, allDisjunctions, myStats);
+		LogicalOpPtr myJoin = make_shared<LogicalJoin>(leftRes.first, rightRes.first, outputTable, topCNF, myStats);
 		// note: getStats gets T, V for bestExp, using the statistics in leftStats U rightStats
 
 		double curCost = myStats->getTupleCount() + leftRes.second + rightRes.second;

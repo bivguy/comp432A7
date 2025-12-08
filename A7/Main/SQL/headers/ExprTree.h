@@ -161,7 +161,8 @@ public:
 	}
 
 	bool referencesAtt (string alias, string attNameToFind) {
-		return alias == tableName && attName == attNameToFind;
+		string aliasedName = tableName + "_" + attName;
+		return aliasedName == attNameToFind;
 	}
 
 	~Identifier () {}

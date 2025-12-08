@@ -15,7 +15,7 @@ private:
 	vector <pair <string, string>> tablesToProcess;
 	vector <ExprTreePtr> allDisjunctions;
 	vector <ExprTreePtr> groupingClauses;
-	int tableNum = 0;
+	int tableNum {0};
 
 public:
 	SFWQuery () {}
